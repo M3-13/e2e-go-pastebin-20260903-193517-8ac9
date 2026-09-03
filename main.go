@@ -35,6 +35,7 @@ func newRouter() *http.ServeMux {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("/health", healthMethodNotAllowed)
 	mux.HandleFunc("POST /pastes", handler.createPaste)
 	mux.HandleFunc("GET /pastes", handler.listPastes)
 	mux.HandleFunc("GET /pastes/{id}", handler.getPaste)
@@ -46,6 +47,15 @@ func newRouter() *http.ServeMux {
 // healthHandler answers GET /health with 200 (skeleton liveness).
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
+}
+
+// healthMethodNotAllowed answers non-GET /health requests with a JSON 405 and
+// an Allow: GET header. GET /health is registered as its own more specific
+// method pattern, so this handler only ever sees the unsupported methods that
+// would otherwise fall through to the "/" catch-all and answer a wrong 404.
+func healthMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", http.MethodGet)
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
 
 // statusRecorder captures the status code written to a ResponseWriter.
