@@ -7,7 +7,7 @@
       "stack": "go",
       "kind": "server",
       "build": [["go", "build", "-o", "pastebin", "."]],
-      "start": ["./pastebin"],
+      "start": ["go", "run", "."],
       "port": 8080,
       "port_env": "PORT",
       "health": { "path": "/health", "expect_status": [200] },
