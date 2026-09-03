@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -31,21 +32,79 @@ func NewStore() *Store {
 
 // Create stores a new paste and returns it. expiresInSeconds <= 0 means no expiry.
 func (s *Store) Create(content, language string, expiresInSeconds int) (Paste, error) {
-	return Paste{}, nil
+	id, err := s.idGen()
+	if err != nil {
+		return Paste{}, err
+	}
+
+	now := time.Now().UTC()
+	p := Paste{
+		ID:        id,
+		Content:   content,
+		Language:  language,
+		CreatedAt: now,
+	}
+	if expiresInSeconds > 0 {
+		exp := now.Add(time.Duration(expiresInSeconds) * time.Second)
+		p.ExpiresAt = &exp
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pastes[id] = p
+	return p, nil
 }
 
 // Get returns the paste for id. The second result is false when the paste is
 // unknown or has expired (lazy removal).
 func (s *Store) Get(id string) (Paste, bool) {
-	return Paste{}, false
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, ok := s.pastes[id]
+	if !ok {
+		return Paste{}, false
+	}
+	if expired(p) {
+		delete(s.pastes, id)
+		return Paste{}, false
+	}
+	return p, true
 }
 
-// List returns the metadata of all valid pastes, newest first.
+// List returns the metadata of all valid pastes, newest first. Expired pastes
+// are removed from the map while iterating.
 func (s *Store) List() []Paste {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]Paste, 0, len(s.pastes))
+	for id, p := range s.pastes {
+		if expired(p) {
+			delete(s.pastes, id)
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out
 }
 
 // Delete removes the paste for id and reports whether it existed.
 func (s *Store) Delete(id string) bool {
-	return false
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.pastes[id]; !ok {
+		return false
+	}
+	delete(s.pastes, id)
+	return true
+}
+
+// expired reports whether the paste has an expiry time that is already past.
+func expired(p Paste) bool {
+	return p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now().UTC())
 }
