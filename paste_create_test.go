@@ -6,7 +6,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// pasteResponse is the JSON body of a successful POST /pastes response.
+type pasteResponse struct {
+	ID        string     `json:"id"`
+	Language  string     `json:"language"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+}
 
 func postPaste(t *testing.T, h http.Handler, body, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -45,8 +54,9 @@ func assertErrorBody(t *testing.T, rec *httptest.ResponseRecorder, wantStatus in
 	}
 }
 
-func TestCreatePasteReturns201WithMetadata(t *testing.T) {
-	h := NewHandler(NewStore())
+func TestCreatePasteReturns201AndPersistsToStore(t *testing.T) {
+	store := NewStore()
+	h := NewHandler(store)
 
 	rec := postPaste(t, h, `{"content":"hello world","language":"go","expires_in_seconds":3600}`, "application/json")
 
@@ -56,17 +66,78 @@ func TestCreatePasteReturns201WithMetadata(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
-	var body map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+
+	var resp pasteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("response is not JSON: %v; body=%s", err, rec.Body.String())
 	}
-	for _, key := range []string{"id", "language", "created_at", "expires_at"} {
-		if _, ok := body[key]; !ok {
-			t.Errorf("response missing %q field: %s", key, rec.Body.String())
+	if resp.ID == "" {
+		t.Fatalf("response id is empty: %s", rec.Body.String())
+	}
+	if resp.Language != "go" {
+		t.Errorf("response language = %q, want %q", resp.Language, "go")
+	}
+	if resp.ExpiresAt == nil {
+		t.Errorf("response expires_at is nil, want a timestamp for expires_in_seconds=3600")
+	}
+	if resp.CreatedAt.IsZero() {
+		t.Errorf("response created_at is zero")
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err == nil {
+		if _, ok := raw["content"]; ok {
+			t.Errorf("response must not include content: %s", rec.Body.String())
 		}
 	}
-	if _, ok := body["content"]; ok {
-		t.Errorf("response must not include content: %s", rec.Body.String())
+
+	got, ok := store.Get(resp.ID)
+	if !ok {
+		t.Fatalf("paste %q not retrievable from store after POST", resp.ID)
+	}
+	if got.Content != "hello world" {
+		t.Errorf("stored content = %q, want %q", got.Content, "hello world")
+	}
+	if got.Language != "go" {
+		t.Errorf("stored language = %q, want %q", got.Language, "go")
+	}
+	if got.ID != resp.ID {
+		t.Errorf("stored id = %q, want %q", got.ID, resp.ID)
+	}
+	if got.ExpiresAt == nil {
+		t.Errorf("stored paste has nil expires_at, want a timestamp")
+	}
+}
+
+func TestCreatePasteDefaultsLanguageToText(t *testing.T) {
+	store := NewStore()
+	h := NewHandler(store)
+
+	rec := postPaste(t, h, `{"content":"no language"}`, "application/json")
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp pasteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v; body=%s", err, rec.Body.String())
+	}
+	if resp.Language != "text" {
+		t.Errorf("response language = %q, want %q (default)", resp.Language, "text")
+	}
+	if resp.ExpiresAt != nil {
+		t.Errorf("response expires_at = %v, want nil when no expiry", resp.ExpiresAt)
+	}
+
+	got, ok := store.Get(resp.ID)
+	if !ok {
+		t.Fatalf("paste %q not retrievable from store", resp.ID)
+	}
+	if got.Language != "text" {
+		t.Errorf("stored language = %q, want %q", got.Language, "text")
+	}
+	if got.ExpiresAt != nil {
+		t.Errorf("stored paste has expires_at = %v, want nil", got.ExpiresAt)
 	}
 }
 
