@@ -1,9 +1,16 @@
 package main
 
-// GenerateID returns a new unique identifier for a paste.
-//
-// This is a stub: the full implementation (crypto/rand, 32 hex chars) is
-// filled in by the store ticket, which also owns the id-generation tests.
+import (
+	"crypto/rand"
+	"encoding/hex"
+)
+
+// GenerateID returns a new unique identifier for a paste: 16 random bytes
+// hex-encoded into 32 hex characters.
 func GenerateID() (string, error) {
-	return "", nil
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
