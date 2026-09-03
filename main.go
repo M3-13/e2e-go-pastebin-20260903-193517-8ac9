@@ -24,13 +24,21 @@ func main() {
 	}
 }
 
-// newRouter wires the health endpoint and the paste handler together.
+// newRouter wires the health endpoint and the paste handler together. Every
+// route is registered as an explicit method pattern so the mux carries a real
+// route entry for each of them; the "/" catch-all remains as fallback so that
+// unsupported methods still reach Handler.ServeHTTP for the JSON 405 (with
+// Allow header) and unknown paths still get the JSON 404.
 func newRouter() *http.ServeMux {
 	store := NewStore()
 	handler := NewHandler(store)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("POST /pastes", handler.createPaste)
+	mux.HandleFunc("GET /pastes", handler.listPastes)
+	mux.HandleFunc("GET /pastes/{id}", handler.getPaste)
+	mux.HandleFunc("DELETE /pastes/{id}", handler.deletePaste)
 	mux.Handle("/", handler)
 	return mux
 }
